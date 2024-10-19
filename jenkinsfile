@@ -1,0 +1,76 @@
+pipeline {
+    agent any
+    environment {
+        REPO_URL = 'https://github.com/AndrewMego/Deployment-of-super-Mario-on-Kubernetes-using-terraform.git'
+        BRANCH = 'main'
+        TERRAFORM_DIR = 'Deployment-of-super-Mario-on-Kubernetes-using-terraform/EKS-TF'
+        REGION = 'ap-south-1'
+        EKS_CLUSTER = 'EKS_CLOUD'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                echo 'Cloning the Git repository...'
+                git url: REPO_URL, branch: BRANCH
+            }
+        }
+
+        stage('Terraform Init & Apply') {
+            steps {
+                dir("${TERRAFORM_DIR}") {
+                    script {
+                        echo 'Initializing and applying Terraform...'
+                        sh 'terraform init'
+                        sh 'terraform plan'
+                        sh 'terraform apply -auto-approve'
+                    }
+                }
+            }
+        }
+
+        stage('Update EKS Config') {
+            steps {
+                script {
+                    echo 'Updating EKS kubeconfig...'
+                    sh "aws eks update-kubeconfig --name ${EKS_CLUSTER} --region ${REGION}"
+                }
+            }
+        }
+
+        stage('Kubernetes Deployment') {
+            steps {
+                parallel (
+                    'Apply Deployment YAML': {
+                        script {
+                            echo 'Applying deployment.yaml to Kubernetes...'
+                            sh 'kubectl apply -f deployment.yaml'
+                        }
+                    },
+                    'Apply Service YAML': {
+                        script {
+                            echo 'Applying service.yaml to Kubernetes...'
+                            sh 'kubectl apply -f service.yaml'
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed. Please check logs.'
+        }
+        always {
+            cleanWs() // Clean up workspace after build
+        }
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')  // Set pipeline timeout to avoid indefinite hangs
+    }
+}
